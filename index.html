@@ -395,7 +395,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
 import { getAuth, signInAnonymously, signInWithEmailAndPassword, onAuthStateChanged, signOut, setPersistence, browserLocalPersistence }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
-import { getFirestore, initializeFirestore, collection, doc, getDoc, getDocs, setDoc, deleteDoc, writeBatch, query, orderBy, onSnapshot, runTransaction, serverTimestamp }
+import { getFirestore, initializeFirestore, collection, doc, getDoc, getDocs, setDoc, deleteDoc, writeBatch, query, orderBy, onSnapshot, runTransaction, serverTimestamp, increment }
   from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
 
 const firebaseConfig = {
@@ -433,7 +433,7 @@ setPersistence(auth, browserLocalPersistence).catch(()=>{});
 const $=(id)=>document.getElementById(id);
 
 let role=null, me=null, seat=null, selectedId=null;
-let depts=[], seats=[], students=[], pub=null, lastStatsKey="";
+let depts=[], seats=[], students=[], roster=null, live=null, lastRosterKey="", lastLiveKey="";
 let unsub=[], unsubSeat=null, pollTimer=null, curTab=null;
 let deptPick=null, allFilter="all", classPick="all", mgTab="dept";
 const ordOf={};
@@ -479,6 +479,11 @@ $("teaGo").addEventListener("click", async ()=>{
   try{ await signInWithEmailAndPassword(auth,$("email").value.trim(),$("pw").value); }
   catch(e){ $("gateErr").textContent="로그인 실패: 이메일/비밀번호를 확인해 주세요."; }
 });
+
+// 엔터키로 입장/로그인
+const onEnter=(el,btn)=>$(el).addEventListener("keydown", e=>{ if(e.key==="Enter"){ e.preventDefault(); const b=$(btn); if(!b.disabled) b.click(); } });
+onEnter("sid","stuGo"); onEnter("birth","stuGo");
+onEnter("email","teaGo"); onEnter("pw","teaGo");
 
 $("outBtn").addEventListener("click", ()=>{
   if(role==="teacher"){ signOut(auth).then(()=>signInAnonymously(auth)); }
@@ -529,7 +534,8 @@ function subscribe(){
   }, e=>console.error(e)));
   if(role==="student"){
     unsubSeat=onSnapshot(doc(db,"seats",me.vhash), s=>{ seat=s.exists()?s.data():null; if(seat) selectedId=null; renderApply(); });
-    unsub.push(onSnapshot(doc(db,"stats","public"), s=>{ pub=s.exists()?s.data():null; renderDash(); }, e=>console.error(e)));
+    unsub.push(onSnapshot(doc(db,"stats","roster"), s=>{ roster=s.exists()?s.data():null; renderDash(); }, e=>console.error(e)));
+    unsub.push(onSnapshot(doc(db,"stats","live"), s=>{ live=s.exists()?s.data():null; renderDash(); }, e=>console.error(e)));
   }
   if(role==="teacher"){
     unsub.push(onSnapshot(collection(db,"seats"), s=>{ seats=s.docs.map(d=>({vhash:d.id,...d.data()})); renderDash(); renderManage(); }, e=>console.error(e)));
@@ -541,11 +547,11 @@ async function pollOnce(){
   try{
     const tasks=[ getDocs(query(collection(db,"departments"),orderBy("ord"))) ];
     if(role==="teacher"){ tasks.push(getDocs(collection(db,"seats"))); tasks.push(getDocs(collection(db,"students"))); }
-    else { tasks.push(getDoc(doc(db,"stats","public"))); }
+    else { tasks.push(getDoc(doc(db,"stats","roster"))); tasks.push(getDoc(doc(db,"stats","live"))); }
     const res=await Promise.all(tasks);
     depts=res[0].docs.map(d=>({id:d.id,...d.data()})); depts.forEach(d=>ordOf[d.id]=d.ord);
     if(role==="teacher"){ seats=res[1].docs.map(d=>({vhash:d.id,...d.data()})); students=res[2].docs.map(d=>({vhash:d.id,...d.data()})); }
-    else if(res[1]){ pub=res[1].exists()?res[1].data():null; }
+    else { if(res[1]) roster=res[1].exists()?res[1].data():null; if(res[2]) live=res[2].exists()?res[2].data():null; }
     renderApply(); renderDash(); if(role==="teacher") renderManage();
   }catch(e){}
 }
@@ -583,7 +589,9 @@ $("applyBtn").addEventListener("click", async ()=>{
       const ds=await tx.get(deptRef); if(!ds.exists()) return {s:"ERR"};
       const d=ds.data(); if(d.filled>=d.capacity) return {s:"FULL",n:d.name};
       tx.set(seatRef,{ studentId:me.studentId, name:me.name, classNo:me.classNo, studentNo:me.studentNo, deptId:selectedId, deptName:d.name, createdAt:serverTimestamp() });
-      tx.update(deptRef,{ filled:d.filled+1 }); return {s:"OK",n:d.name};
+      tx.update(deptRef,{ filled:d.filled+1 });
+      tx.set(doc(db,"stats","live"), { [String(me.classNo)]: increment(1) }, { merge:true });
+      return {s:"OK",n:d.name};
     });
     if(r.s==="OK") showMsg($("mainMsg"),`🎉 '${r.n}' 신청이 완료되었습니다!`,"success");
     else if(r.s==="FULL") showMsg($("mainMsg"),`방금 '${r.n}'가 마감되었습니다. 다른 학과를 선택해 주세요.`,"error");
@@ -598,8 +606,10 @@ $("cancelBtn").addEventListener("click", async ()=>{
   try{
     await runTransaction(db, async (tx)=>{
       const seatRef=doc(db,"seats",me.vhash); const ss=await tx.get(seatRef); if(!ss.exists()) return;
+      const cNo=ss.data().classNo;
       const deptRef=doc(db,"departments",ss.data().deptId); const ds=await tx.get(deptRef);
       tx.update(deptRef,{ filled:Math.max(0,(ds.exists()?ds.data().filled:0)-1) }); tx.delete(seatRef);
+      tx.set(doc(db,"stats","live"), { [String(cNo)]: increment(-1) }, { merge:true });
     });
     showMsg($("mainMsg"),"신청이 취소되었습니다. 원하는 학과를 다시 선택해 주세요.","info");
   }catch(e){ console.error(e); showMsg($("mainMsg"),"취소 중 오류가 발생했습니다.","error"); }
@@ -616,10 +626,13 @@ function publishStats(){
   const classTotals={}, classDone={};
   students.forEach(st=>{ const p=parseSid(st.studentId); classTotals[p.classNo]=(classTotals[p.classNo]||0)+1; });
   seats.forEach(s=>classDone[s.classNo]=(classDone[s.classNo]||0)+1);
-  const payload={ totalStudents:students.length, classTotals, classDone };
-  const key=JSON.stringify(payload);
-  if(key===lastStatsKey) return; lastStatsKey=key;
-  setDoc(doc(db,"stats","public"), {...payload, ts:serverTimestamp()}).catch(e=>console.error("stats write:",e));
+  // 전교생/반별 정원 → roster (교사만 기록)
+  const rosterPayload={ totalStudents:students.length, classTotals };
+  const rk=JSON.stringify(rosterPayload);
+  if(rk!==lastRosterKey){ lastRosterKey=rk; setDoc(doc(db,"stats","roster"), {...rosterPayload, ts:serverTimestamp()}).catch(e=>console.error("roster write:",e)); }
+  // 반별 신청 수 → live 전체 보정(드리프트 치유)
+  const lk=JSON.stringify(classDone);
+  if(lk!==lastLiveKey){ lastLiveKey=lk; setDoc(doc(db,"stats","live"), classDone).catch(e=>console.error("live write:",e)); }
 }
 function _renderDash(){
   if(!role) return;
@@ -629,11 +642,11 @@ function _renderDash(){
   const remain=depts.reduce((s,d)=>s+Math.max(0,(d.capacity||0)-(d.filled||0)),0);
   const closed=depts.filter(d=>d.filled>=d.capacity).length;
 
-  // 집계 소스: 교사=실데이터, 학생=공개집계(pub)
+  // 집계 소스: 교사=실데이터, 학생=roster(정원)+live(신청수)
   if(isT) publishStats();
-  const classTotals = isT ? (()=>{ const o={}; students.forEach(st=>{const p=parseSid(st.studentId); o[p.classNo]=(o[p.classNo]||0)+1;}); return o; })() : (pub?.classTotals||{});
-  const classDone   = isT ? (()=>{ const o={}; seats.forEach(s=>o[s.classNo]=(o[s.classNo]||0)+1); return o; })() : (pub?.classDone||{});
-  const stuN = isT ? students.length : (pub?.totalStudents ?? 0);
+  const classTotals = isT ? (()=>{ const o={}; students.forEach(st=>{const p=parseSid(st.studentId); o[p.classNo]=(o[p.classNo]||0)+1;}); return o; })() : (roster?.classTotals||{});
+  const classDone   = isT ? (()=>{ const o={}; seats.forEach(s=>o[s.classNo]=(o[s.classNo]||0)+1); return o; })() : (()=>{ const o={}; if(live) Object.keys(live).forEach(k=>{ if(/^\d+$/.test(k)) o[k]=Math.max(0,live[k]||0); }); return o; })();
+  const stuN = isT ? students.length : (roster?.totalStudents ?? 0);
   const haveTotal = stuN>0;
   const na = haveTotal ? Math.max(0,stuN-filled) : null;
   const rate = haveTotal ? Math.round(filled/stuN*100) : null;
@@ -802,6 +815,7 @@ async function cancelSeat(vhash){
   try{ await runTransaction(db, async (tx)=>{
       const deptRef=doc(db,"departments",s.deptId); const ds=await tx.get(deptRef); const cur=ds.exists()?ds.data().filled:0;
       tx.update(deptRef,{filled:Math.max(0,cur-1)}); tx.delete(doc(db,"seats",vhash));
+      tx.set(doc(db,"stats","live"), { [String(s.classNo)]: increment(-1) }, { merge:true });
     }); }catch(e){ console.error(e); alert("취소 중 오류가 발생했습니다."); }
 }
 async function deleteStudent(vhash){
@@ -812,6 +826,7 @@ async function deleteStudent(vhash){
     if(hasSeat){ await runTransaction(db, async (tx)=>{
         const deptRef=doc(db,"departments",hasSeat.deptId); const ds=await tx.get(deptRef); const cur=ds.exists()?ds.data().filled:0;
         tx.update(deptRef,{filled:Math.max(0,cur-1)}); tx.delete(doc(db,"seats",vhash));
+        tx.set(doc(db,"stats","live"), { [String(p.classNo)]: increment(-1) }, { merge:true });
       }); }
     await deleteDoc(doc(db,"students",vhash));
     setStatus(`${st.name} 학생을 삭제했습니다.`,"ok");
