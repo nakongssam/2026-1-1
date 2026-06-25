@@ -163,7 +163,8 @@
   .tab.active{ background:var(--surface); color:var(--ink); box-shadow:var(--shadow); }
   .chips{ display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
   .chipgrid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(132px,1fr)); gap:8px; margin-bottom:14px; }
-  .chipgrid.cls{ grid-template-columns:repeat(auto-fill,minmax(72px,1fr)); }
+  .chipgrid.cls{ grid-template-columns:repeat(14,1fr); }
+  .chipgrid.cls .chip{ padding:8px 4px; font-size:.84rem; }
   .chipgrid .chip{ justify-content:center; }
   .chip{ display:inline-flex; align-items:center; gap:7px; padding:8px 14px; border-radius:999px; background:var(--surface); border:1.5px solid var(--line2); color:var(--body); cursor:pointer; font-size:.88rem; font-weight:600; }
   .chip:hover{ border-color:var(--dc); }
@@ -206,11 +207,21 @@
   .mrow .mnm{ font-weight:600; color:var(--ink); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
   .mrow .rm{ font-size:.82rem; opacity:.55; } .mrow .rm:hover{ opacity:1; }
   .subhead{ margin-top:10px; padding:9px 12px; background:var(--yellow-soft); border-radius:10px; font-size:.84rem; font-weight:700; color:var(--ink); }
-  .distgrid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(180px,1fr)); gap:9px; margin-top:10px; }
+  .distgrid{ display:grid; grid-template-columns:repeat(auto-fill,minmax(165px,1fr)); gap:9px; margin-top:10px; }
   .distcard{ background:var(--page); border:1px solid var(--line2); border-left:4px solid var(--dc,var(--yellow-d)); border-radius:11px; padding:10px 12px; }
-  .distcard .dh{ display:flex; justify-content:space-between; align-items:center; gap:6px; margin-bottom:5px; }
-  .distcard .dn{ font-weight:700; color:var(--ink); font-size:.88rem; }
-  .distcard .names{ font-size:.82rem; color:var(--body); line-height:1.55; }
+  .distcard .dh{ display:flex; justify-content:space-between; align-items:center; gap:6px; margin-bottom:6px; }
+  .distcard .dn{ font-weight:700; color:var(--ink); font-size:.86rem; }
+  .ntags{ display:flex; flex-wrap:wrap; gap:4px; }
+  .mtag{ font-size:.76rem; background:var(--surface); border:1px solid var(--line); border-radius:7px; padding:1px 6px; color:var(--body); white-space:nowrap; }
+  .ntags .muted{ color:var(--muted); font-size:.82rem; }
+  .classwrap{ display:grid; grid-template-columns:300px 1fr; gap:14px; align-items:start; }
+  .leftlist td.no, .leftlist th.no{ width:38px; }
+  .leftlist .seatcol{ white-space:nowrap; }
+  .leftlist .dpill{ max-width:118px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; vertical-align:middle; }
+  .leftlist .gearcol{ width:30px; }
+  .gear{ background:none; border:none; cursor:pointer; font-size:1rem; opacity:.55; padding:0; line-height:1; }
+  .gear:hover{ opacity:1; }
+  @media (max-width:760px){ .classwrap{ grid-template-columns:1fr; } }
   .brow{ display:flex; gap:8px; align-items:flex-start; font-size:.86rem; padding:5px 0; border-bottom:1px solid var(--line); }
   .brow:last-child{ border-bottom:none; }
   .brow .names{ color:var(--body); }
@@ -233,6 +244,7 @@
   @media (max-width:520px){
     .grid{ grid-template-columns:repeat(2,1fr); gap:8px; } .kpi .v{ font-size:1.4rem; }
     .dgrid{ grid-template-columns:1fr; } .cgrid{ grid-template-columns:repeat(2,1fr); } .mgrid, .mgrid.wide{ grid-template-columns:1fr; } .mlist{ grid-template-columns:repeat(2,1fr); } .toolbar select{ min-width:0; flex:1; }
+    .chipgrid{ grid-template-columns:repeat(2,1fr); } .chipgrid.cls{ grid-template-columns:repeat(5,1fr); }
   }
 </style>
 </head>
@@ -319,7 +331,7 @@
     <!-- 명단 관리 (교사) -->
     <div class="panel" id="panelManage">
       <div class="mgbar">
-        <button class="ghost" id="csvBtn">⬇ CSV</button>
+        <button class="ghost" id="csvBtn">CSV</button>
         <button id="addStuBtn">＋ 학생 추가</button>
       </div>
       <div class="bar" id="advBtns" style="display:none;">
@@ -344,6 +356,15 @@
       <div id="allView" class="mgrid wide" style="display:none;"></div>
       <div id="classView" style="display:none;"></div>
     </div>
+  </div>
+</div>
+
+<div class="modal" id="rowModal">
+  <div class="box">
+    <h3 id="rowTitle">학생</h3>
+    <button class="full" id="rowCancelSeat">신청 취소</button>
+    <button class="full" id="rowDelStu" style="background:var(--rose-soft,#fdeee4);color:var(--danger);">학생 삭제</button>
+    <button class="full x" id="rowClose">닫기</button>
   </div>
 </div>
 
@@ -740,25 +761,28 @@ function renderClass(seatByVhash){
   const keys=Object.keys(classes).map(Number).sort((a,b)=>a-b);
   if(!keys.length){ $("classView").innerHTML=`<div class="mempty">학생 명단을 먼저 등록하면 반별 명단이 표시됩니다.</div>`; return; }
   const showKeys = (classPick==="all") ? keys : keys.filter(c=>c===+classPick);
+  const tag=(x)=>`<span class="mtag">${x.studentNo} ${esc(x.name)}</span>`;
   $("classView").innerHTML = showKeys.map(c=>{
     const all=classes[c].slice().sort((a,b)=>a.studentNo-b.studentNo);
     const done=all.filter(x=>x.seat).length;
-    const rows=all.map(x=>`<tr><td style="width:48px">${x.studentNo}번</td><td class="nm">${esc(x.name)}</td>
-        <td>${x.seat?deptBadge(x.seat.deptName, ordOf[x.seat.deptId]):'<span class="npill">미신청</span>'}</td>
-        <td class="right" style="width:50px"><button class="rm" data-del="${x.vhash}">삭제</button></td></tr>`).join("");
+    const rows=all.map(x=>`<tr><td class="no">${x.studentNo}</td><td class="nm">${esc(x.name)}</td>
+        <td class="seatcol">${x.seat?deptBadge(x.seat.deptName, ordOf[x.seat.deptId]):'<span class="npill">미신청</span>'}</td>
+        <td class="right gearcol"><button class="gear" data-menu="${x.vhash}" title="설정">⚙</button></td></tr>`).join("");
     const byD={}; all.forEach(x=>{ if(x.seat) (byD[x.seat.deptId] ||= []).push(x); });
-    const noneCnt=all.length-done;
-    const dlist=depts.filter(dd=>byD[dd.id]&&byD[dd.id].length);
-    const cards = dlist.map(dd=>{ const names=byD[dd.id].sort((a,b)=>a.studentNo-b.studentNo).map(x=>`${x.studentNo} ${esc(x.name)}`).join(", ");
-        return `<div class="distcard" style="--dc:${colorOf(dd.ord)}"><div class="dh"><span class="dn">${esc(dd.name)}</span><span class="npill">${byD[dd.id].length}명</span></div><div class="names">${names}</div></div>`; }).join("");
-    const noneCard = noneCnt ? `<div class="distcard" style="--dc:var(--line2)"><div class="dh"><span class="dn">미신청</span><span class="npill">${noneCnt}명</span></div><div class="names">${all.filter(x=>!x.seat).map(x=>`${x.studentNo} ${esc(x.name)}`).join(", ")}</div></div>` : "";
-    const brk = `<div class="subhead">📊 ${c}반 학과별 분포</div><div class="distgrid">${cards}${noneCard||'<div class="mempty">신청 내역이 없습니다.</div>'}</div>`;
-    return `<div class="mgrid wide" style="margin-bottom:14px">
-      <div class="dcard plain"><div class="head"><span class="nm">🏫 ${c}반 전체</span><span class="cnt">${done}/${all.length} 신청</span></div>
-        <table><thead><tr><th>번호</th><th>이름</th><th>신청 학과</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
-      <div class="dcard plain">${brk}</div></div>`;
+    const cards = depts.map(dd=>{
+      const arr=(byD[dd.id]||[]).sort((a,b)=>a.studentNo-b.studentNo);
+      const names = arr.length ? arr.map(tag).join("") : `<span class="muted">—</span>`;
+      return `<div class="distcard" style="--dc:${colorOf(dd.ord)}"><div class="dh"><span class="dn">${esc(dd.name)}</span><span class="npill">${arr.length}명</span></div><div class="ntags">${names}</div></div>`;
+    }).join("");
+    const noneArr=all.filter(x=>!x.seat);
+    const noneCard = `<div class="distcard" style="--dc:var(--line2)"><div class="dh"><span class="dn">미신청</span><span class="npill">${noneArr.length}명</span></div><div class="ntags">${noneArr.length?noneArr.map(tag).join(""):'<span class="muted">—</span>'}</div></div>`;
+    return `<div class="classwrap" style="margin-bottom:14px">
+      <div class="dcard plain leftlist"><div class="head"><span class="nm">🏫 ${c}반 전체</span><span class="cnt">${done}/${all.length} 신청</span></div>
+        <table><thead><tr><th class="no">번호</th><th>이름</th><th>신청 학과</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>
+      <div class="dcard plain"><div class="subhead" style="margin-top:0">📊 ${c}반 학과별 분포</div><div class="distgrid">${cards}${noneCard}</div></div>
+    </div>`;
   }).join("");
-  $("classView").querySelectorAll("[data-del]").forEach(b=>b.addEventListener("click", ()=>deleteStudent(b.dataset.del)));
+  $("classView").querySelectorAll("[data-menu]").forEach(b=>b.addEventListener("click", ()=>openRowMenu(b.dataset.menu)));
 }
 
 async function cancelSeat(vhash){
@@ -782,6 +806,21 @@ async function deleteStudent(vhash){
     setStatus(`${st.name} 학생을 삭제했습니다.`,"ok");
   }catch(e){ console.error(e); alert("삭제 중 오류가 발생했습니다."); }
 }
+
+let rowVhash=null;
+function openRowMenu(vhash){
+  const st=students.find(x=>x.vhash===vhash); if(!st) return;
+  rowVhash=vhash;
+  const p=parseSid(st.studentId); const hasSeat=seats.find(x=>x.vhash===vhash);
+  $("rowTitle").textContent=`${st.name} (${p.classNo}반 ${p.studentNo}번)`;
+  const cs=$("rowCancelSeat");
+  if(hasSeat){ cs.disabled=false; cs.style.opacity="1"; cs.textContent=`신청 취소 (${hasSeat.deptName})`; }
+  else { cs.disabled=true; cs.style.opacity=".45"; cs.textContent="신청 취소 (신청 내역 없음)"; }
+  $("rowModal").classList.add("show");
+}
+$("rowClose").addEventListener("click", ()=>$("rowModal").classList.remove("show"));
+$("rowCancelSeat").addEventListener("click", ()=>{ if($("rowCancelSeat").disabled) return; $("rowModal").classList.remove("show"); if(rowVhash) cancelSeat(rowVhash); });
+$("rowDelStu").addEventListener("click", ()=>{ $("rowModal").classList.remove("show"); if(rowVhash) deleteStudent(rowVhash); });
 
 $("addStuBtn").addEventListener("click", ()=>{ $("addMsg").textContent=""; $("addModal").classList.add("show"); });
 $("addCancel").addEventListener("click", ()=>$("addModal").classList.remove("show"));
