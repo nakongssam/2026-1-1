@@ -195,7 +195,7 @@
   .npill{ display:inline-block; font-size:.75rem; font-weight:600; color:var(--muted); background:var(--track); padding:2px 9px; border-radius:999px; }
   .rm{ color:var(--danger); cursor:pointer; font-size:.8rem; background:none; border:none; padding:0; font-weight:700; }
   .mempty{ color:var(--muted); font-size:.88rem; padding:14px 4px; }
-  .mlist{ display:grid; grid-template-columns:repeat(auto-fill,minmax(185px,1fr)); gap:0 18px; margin-top:10px; }
+  .mlist{ display:grid; grid-template-columns:repeat(4,1fr); gap:0 18px; margin-top:10px; }
   .mrow{ display:flex; align-items:center; gap:9px; padding:7px 0; border-bottom:1px solid var(--line); font-size:.92rem; }
   .mrow .mno{ color:var(--muted); font-size:.8rem; min-width:62px; font-variant-numeric:tabular-nums; }
   .mrow .mnm{ font-weight:600; color:var(--ink); flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
@@ -221,7 +221,7 @@
   }
   @media (max-width:520px){
     .grid{ grid-template-columns:repeat(2,1fr); gap:8px; } .kpi .v{ font-size:1.4rem; }
-    .dgrid{ grid-template-columns:1fr; } .cgrid{ grid-template-columns:repeat(2,1fr); } .mgrid, .mgrid.wide{ grid-template-columns:1fr; } .toolbar select{ min-width:0; flex:1; }
+    .dgrid{ grid-template-columns:1fr; } .cgrid{ grid-template-columns:repeat(2,1fr); } .mgrid, .mgrid.wide{ grid-template-columns:1fr; } .mlist{ grid-template-columns:repeat(2,1fr); } .toolbar select{ min-width:0; flex:1; }
   }
 </style>
 </head>
@@ -316,7 +316,7 @@
         <input type="file" id="fileInput" accept=".xlsx,.xls" style="display:none" />
       </div>
       <div id="status"></div>
-      <div class="summary" id="summary">불러오는 중…</div>
+      <div class="summary" id="summary" style="display:none;"></div>
       <div class="tabs">
         <div class="tab active" id="tabDept">학과별 명단</div>
         <div class="tab" id="tabClass">반별 명단</div>
@@ -664,9 +664,9 @@ $("allDeptFilter").addEventListener("change", e=>{ allFilter=e.target.value; ren
 function renderManage(){ if(role!=="teacher") return; try{ _renderManage(); }catch(e){ console.error("manage error:",e); } }
 function _renderManage(){
   const seatByVhash={}; seats.forEach(s=>seatByVhash[s.vhash]=s);
-  $("summary").innerHTML =
-    `신청 <b>${seats.length}</b>명 · 등록 학생 <b>${students.length}</b>명 · 학과 <b>${depts.length}</b>개`
-    + (students.length?"":` · <span style="color:#dd5a4e">학생 명단이 없습니다. 「명단 관리」 제목을 5번 누르면 「학생 명단 가져오기」가 나타나요.</span>`);
+  const sm=$("summary");
+  if(students.length){ sm.style.display="none"; sm.innerHTML=""; }
+  else { sm.style.display="block"; sm.innerHTML=`<span style="color:#dd5a4e">학생 명단이 없습니다. 「명단 관리」 제목을 5번 누르면 「학생 명단 가져오기」가 나타나요.</span>`; }
 
   $("deptChips").innerHTML = depts.map(d=>{
     const full=d.filled>=d.capacity;
